@@ -6,7 +6,6 @@ numpy
 nano-vectordb
 openai
 tenacity
-tiktoken
 pydantic
 python-multipart
 websockets

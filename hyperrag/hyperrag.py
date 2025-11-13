@@ -3,7 +3,7 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import partial
-from typing import Type, cast
+from typing import Mapping, Sequence, Type, cast
 
 from .operate import (
     chunking_by_token_size,
@@ -28,11 +28,15 @@ from .storage import (
 
 from .utils import (
     EmbeddingFunc,
+    RegexTokenizer,
+    Tokenizer,
     compute_mdhash_id,
     limit_async_func_call,
     convert_response_to_json,
+    format_elasticsearch_document,
     logger,
     set_logger,
+    set_tokenizer,
 )
 from .base import (
     BaseKVStorage,
@@ -69,6 +73,7 @@ class HyperRAG:
     chunk_token_size: int = 1200
     chunk_overlap_token_size: int = 100
     tiktoken_model_name: str = "gpt-4o-mini"
+    tokenizer: Tokenizer = field(default_factory=RegexTokenizer)
 
     # entity extraction
     entity_extract_max_gleaning: int = 1
@@ -103,6 +108,7 @@ class HyperRAG:
     def __post_init__(self):
         log_file = os.path.join(self.working_dir, "HyperRAG.log")
         set_logger(log_file)
+        set_tokenizer(self.tokenizer)
         logger.setLevel(self.log_level)
 
         logger.info(f"Logger initialized for working directory: {self.working_dir}")
@@ -169,6 +175,29 @@ class HyperRAG:
     def insert(self, string_or_strings):
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.ainsert(string_or_strings))
+
+    def insert_elasticsearch_documents(
+        self,
+        documents: Mapping[str, object] | Sequence[Mapping[str, object]],
+        **format_kwargs,
+    ):
+        """Insert ElasticSearch ES|QL documents after formatting their content.
+
+        The helper emphasises the ``main_content`` payload while preserving
+        ``titles`` and ``breadcrumbs`` context so downstream entity extraction is
+        aware of each document's scope. Additional keyword arguments are passed
+        through to :func:`format_elasticsearch_document` for fine-tuning the
+        formatting behaviour (for example ``metadata_fields``).
+        """
+
+        if isinstance(documents, Mapping):
+            documents = [documents]
+
+        formatted_docs = [
+            format_elasticsearch_document(doc, **format_kwargs)
+            for doc in documents
+        ]
+        return self.insert(formatted_docs)
 
     async def ainsert(self, string_or_strings):
         try:
