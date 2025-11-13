@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import wraps
 from hashlib import md5
@@ -377,4 +378,99 @@ def deduplicate_by_key(data_list, key_string):
         if key not in seen_keys:
             seen_keys.add(key)
             unique_data.append(item)
-    return unique_data  
+    return unique_data
+
+
+def _normalize_string_sequence(value: Any, delimiter: str = " > ") -> str:
+    """Normalize values that may be strings, lists, or tuples into a string."""
+
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        cleaned_parts = [str(v).strip() for v in value if str(v).strip()]
+        return delimiter.join(cleaned_parts)
+    return str(value).strip()
+
+
+def format_elasticsearch_document(
+    document: Mapping[str, Any],
+    *,
+    metadata_fields: Sequence[str] | None = None,
+    main_content_key: str = "main_content",
+    title_keys: Sequence[str] = ("title", "titles"),
+    breadcrumbs_key: str = "breadcrumbs",
+) -> str:
+    """Create a structured text payload from an ElasticSearch ES|QL document.
+
+    Parameters
+    ----------
+    document:
+        Source payload retrieved from ElasticSearch.
+    metadata_fields:
+        Optional subset of keys to surface as additional metadata rows. When not
+        provided, all non-empty scalar fields (excluding title/breadcrumb/main
+        content keys) are appended automatically.
+    main_content_key:
+        Key name containing the full article text such as tutorials or guides.
+    title_keys:
+        Ordered collection of candidate keys that may represent the document
+        title.
+    breadcrumbs_key:
+        Key holding hierarchical navigation data.
+
+    Returns
+    -------
+    str
+        Human-readable text that prioritises ``main_content`` while preserving
+        concise breadcrumbs and title context so HyperRAG can ingest the
+        document with minimal preprocessing.
+    """
+
+    if main_content_key not in document or not str(document[main_content_key]).strip():
+        raise ValueError(
+            f"ElasticSearch document must include non-empty '{main_content_key}' content."
+        )
+
+    main_content = str(document[main_content_key]).strip()
+    title_value = next(
+        (
+            _normalize_string_sequence(document[key])
+            for key in title_keys
+            if key in document and _normalize_string_sequence(document[key])
+        ),
+        "",
+    )
+    breadcrumbs_value = _normalize_string_sequence(document.get(breadcrumbs_key))
+
+    sections: list[str] = []
+    if title_value:
+        sections.append(f"Title:\n{title_value}")
+    if breadcrumbs_value:
+        sections.append(f"Breadcrumbs:\n{breadcrumbs_value}")
+
+    sections.append(f"Main Content:\n{main_content}")
+
+    candidate_metadata = metadata_fields
+    if candidate_metadata is None:
+        excluded_keys = set(title_keys) | {main_content_key, breadcrumbs_key}
+        candidate_metadata = [
+            key
+            for key in document.keys()
+            if key not in excluded_keys
+        ]
+
+    metadata_lines = []
+    for key in candidate_metadata:
+        if key not in document:
+            continue
+        value = _normalize_string_sequence(document[key], delimiter=", ")
+        if not value:
+            continue
+        metadata_lines.append(f"{key}: {value}")
+
+    if metadata_lines:
+        sections.append("Metadata:\n" + "\n".join(metadata_lines))
+
+    return "\n\n".join(sections)
