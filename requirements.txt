@@ -5,6 +5,5 @@ numpy
 nano-vectordb
 openai
 tenacity
-tiktoken
 xxhash
 hypergraph-db
