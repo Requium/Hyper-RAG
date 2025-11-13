@@ -116,6 +116,45 @@ EMB_DIM = 1536
 python examples/hyperrag_demo.py
 ```
 
+### Ingest ElasticSearch ES|QL content
+
+The repository also provides `examples/hyperrag_elasticsearch_demo.py`, which
+connects to an ElasticSearch index, retrieves the `main_content`, `breadcrumbs`,
+`title`, and `titles` fields, and ingests them into HyperRAG before running a
+query.
+
+1. Install the optional ElasticSearch dependency:
+
+   ```bash
+   pip install elasticsearch
+   ```
+
+2. Configure your LLM credentials in `my_config.py` as described above.
+
+3. Provide ElasticSearch connection details either via CLI flags or
+   environment variables (`ELASTICSEARCH_URL`, optional authentication such as
+   `ELASTICSEARCH_API_KEY_ID`/`ELASTICSEARCH_API_KEY` or
+   `ELASTICSEARCH_USERNAME`/`ELASTICSEARCH_PASSWORD`).
+
+4. Run the demo, specifying the target index and optional keyword filter:
+
+   ```bash
+   ELASTICSEARCH_URL="https://your-cluster" \
+   ELASTICSEARCH_API_KEY_ID="abc123" \
+   ELASTICSEARCH_API_KEY="secret" \
+   python examples/hyperrag_elasticsearch_demo.py esql_docs --keyword "latency troubleshooting"
+   ```
+
+   The script creates a cache directory under `caches/` for the retrieved
+   documents and prints the HyperRAG response to the provided question. The
+   positional `index` argument (`esql_docs` in the example above) controls
+   which ElasticSearch index is queried, allowing you to target a specific
+   collection when running multiple ES|QL crawls.
+
+5. If you are connecting to a development cluster with self-signed
+   certificates, add `--skip-tls-verify` to the command to disable certificate
+   verification. Only use this option in trusted environments.
+
 ### Or Run by Steps
 
 1. Prepare the data. You can download the dataset from Google Drive <a href="https://drive.google.com/drive/folders/1JxXXUR4Jx-2IKn4VGpDeH4xb4-nYEWBx?usp=sharing">here</a>, or Baidu Cloud <a href="https://pan.baidu.com/s/1mrDJVpMW59gLtRRSXafXdw?pwd=w642">here</a>. Put the dataset in the root direction. Then run the following command to preprocess the data.
