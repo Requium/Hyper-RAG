@@ -1,7 +1,6 @@
 import re
 import sys
 import json
-import tiktoken
 import numpy as np
 from tqdm import tqdm
 from pathlib import Path
@@ -103,7 +102,6 @@ question_prompt = {
         """,
 }
 
-encoding = tiktoken.encoding_for_model("gpt-4o")
 
 
 if __name__ == "__main__":
