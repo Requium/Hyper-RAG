@@ -28,11 +28,14 @@ from .storage import (
 
 from .utils import (
     EmbeddingFunc,
+    RegexTokenizer,
+    Tokenizer,
     compute_mdhash_id,
     limit_async_func_call,
     convert_response_to_json,
     logger,
     set_logger,
+    set_tokenizer,
 )
 from .base import (
     BaseKVStorage,
@@ -69,6 +72,7 @@ class HyperRAG:
     chunk_token_size: int = 1200
     chunk_overlap_token_size: int = 100
     tiktoken_model_name: str = "gpt-4o-mini"
+    tokenizer: Tokenizer = field(default_factory=RegexTokenizer)
 
     # entity extraction
     entity_extract_max_gleaning: int = 1
@@ -103,6 +107,7 @@ class HyperRAG:
     def __post_init__(self):
         log_file = os.path.join(self.working_dir, "HyperRAG.log")
         set_logger(log_file)
+        set_tokenizer(self.tokenizer)
         logger.setLevel(self.log_level)
 
         logger.info(f"Logger initialized for working directory: {self.working_dir}")

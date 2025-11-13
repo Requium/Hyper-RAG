@@ -32,19 +32,29 @@ from .base import (
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
 
 def chunking_by_token_size(
-    content: str, overlap_token_size=128, max_token_size=1024, tiktoken_model="gpt-4o"
+    content: str,
+    overlap_token_size: int = 128,
+    max_token_size: int = 1024,
+    tiktoken_model: str | None = None,
 ):
-    tokens = encode_string_by_tiktoken(content, model_name=tiktoken_model)
+    """Split *content* into overlapping chunks based on tokenizer length.
+
+    The ``tiktoken_model`` argument is kept for backwards compatibility with
+    earlier releases but is no longer required because tokenization is provided
+    by a model-agnostic tokenizer. The argument is therefore ignored.
+    """
+
+    tokens = encode_string_by_tiktoken(content, model_name=tiktoken_model or "")
     results = []
     for index, start in enumerate(
         range(0, len(tokens), max_token_size - overlap_token_size)
     ):
         chunk_content = decode_tokens_by_tiktoken(
-            tokens[start : start + max_token_size], model_name=tiktoken_model
+            tokens[start : start + max_token_size], model_name=tiktoken_model or ""
         )
         results.append(
             {
-                "tokens": min(max_token_size, len(tokens) - start),
+                "tokens": len(tokens[start : start + max_token_size]),
                 "content": chunk_content.strip(),
                 "chunk_order_index": index,
             }

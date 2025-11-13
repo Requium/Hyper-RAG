@@ -9,15 +9,57 @@ import re
 from dataclasses import dataclass
 from functools import wraps
 from hashlib import md5
-from typing import Any, Union, List
+from typing import Any, Protocol, Union, List
 import xml.etree.ElementTree as ET
 
 import numpy as np
-import tiktoken
-
-ENCODER = None
 
 logger = logging.getLogger("hyper_rag")
+
+
+class Tokenizer(Protocol):
+    """Protocol describing the minimal tokenizer surface used by HyperRAG."""
+
+    def encode(self, text: str) -> list[str]:
+        """Split *text* into tokens."""
+
+    def decode(self, tokens: list[str]) -> str:
+        """Reconstruct a string from the provided tokens."""
+
+
+class RegexTokenizer:
+    """A lightweight regex-based tokenizer compatible with generic LLMs.
+
+    The tokenizer preserves whitespace tokens to keep round-trip encode/decode
+    behaviour stable without depending on vendor-specific libraries such as
+    tiktoken.
+    """
+
+    _pattern = re.compile(r"\s+|\S+")
+
+    def encode(self, text: str) -> list[str]:
+        if not text:
+            return []
+        return self._pattern.findall(text)
+
+    def decode(self, tokens: list[str]) -> str:
+        if not tokens:
+            return ""
+        return "".join(tokens)
+
+
+_TOKENIZER: Tokenizer = RegexTokenizer()
+
+
+def set_tokenizer(tokenizer: Tokenizer):
+    """Register a tokenizer implementation for downstream helpers to use."""
+
+    global _TOKENIZER
+    _TOKENIZER = tokenizer
+
+
+def get_tokenizer() -> Tokenizer:
+    return _TOKENIZER
 
 
 def set_logger(log_file: str):
@@ -117,20 +159,21 @@ def write_json(json_obj, file_name):
         json.dump(json_obj, f, indent=2, ensure_ascii=False)
 
 
-def encode_string_by_tiktoken(content: str, model_name: str = "gpt-4o"):
-    global ENCODER
-    if ENCODER is None:
-        ENCODER = tiktoken.encoding_for_model(model_name)
-    tokens = ENCODER.encode(content)
-    return tokens
+def encode_string_by_tiktoken(content: str, model_name: str = ""):
+    """Tokenize *content* using the globally configured tokenizer.
+
+    The argument ``model_name`` is preserved for backwards compatibility with
+    previous tiktoken-based signatures; it is ignored by the default
+    implementation.
+    """
+
+    return get_tokenizer().encode(content)
 
 
-def decode_tokens_by_tiktoken(tokens: list[int], model_name: str = "gpt-4o"):
-    global ENCODER
-    if ENCODER is None:
-        ENCODER = tiktoken.encoding_for_model(model_name)
-    content = ENCODER.decode(tokens)
-    return content
+def decode_tokens_by_tiktoken(tokens: list[str], model_name: str = ""):
+    """Reconstruct text from the provided tokens using the global tokenizer."""
+
+    return get_tokenizer().decode(tokens)
 
 
 def pack_user_ass_to_openai_messages(*args: str):
