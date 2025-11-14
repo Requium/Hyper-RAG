@@ -179,6 +179,9 @@ class HyperRAG:
     def insert_elasticsearch_documents(
         self,
         documents: Mapping[str, object] | Sequence[Mapping[str, object]],
+        *,
+        combine_documents: bool = False,
+        document_separator: str | None = None,
         **format_kwargs,
     ):
         """Insert ElasticSearch ES|QL documents after formatting their content.
@@ -187,7 +190,10 @@ class HyperRAG:
         ``titles`` and ``breadcrumbs`` context so downstream entity extraction is
         aware of each document's scope. Additional keyword arguments are passed
         through to :func:`format_elasticsearch_document` for fine-tuning the
-        formatting behaviour (for example ``metadata_fields``).
+        formatting behaviour (for example ``metadata_fields``). When
+        ``combine_documents`` is ``True`` all formatted documents are merged into
+        a single payload separated by ``document_separator`` so language models
+        can reason across the entire corpus at once.
         """
 
         if isinstance(documents, Mapping):
@@ -197,6 +203,16 @@ class HyperRAG:
             format_elasticsearch_document(doc, **format_kwargs)
             for doc in documents
         ]
+
+        if combine_documents and formatted_docs:
+            separator = document_separator or (
+                "\n\n" + "=" * 40 + "\n\n"
+            )
+            combined_payload = []
+            for index, content in enumerate(formatted_docs, start=1):
+                combined_payload.append(f"Document {index}:\n{content}")
+            formatted_docs = [separator.join(combined_payload)]
+
         return self.insert(formatted_docs)
 
     async def ainsert(self, string_or_strings):

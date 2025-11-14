@@ -266,7 +266,10 @@ def main() -> None:
         wait=wait_exponential(multiplier=1, min=2, max=60),
     )
     def _insert_with_backoff() -> None:
-        rag.insert_elasticsearch_documents(documents)
+        rag.insert_elasticsearch_documents(
+            documents,
+            combine_documents=True,
+        )
 
     try:
         _insert_with_backoff()
