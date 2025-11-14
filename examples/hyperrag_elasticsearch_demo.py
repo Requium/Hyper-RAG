@@ -14,6 +14,14 @@ import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from tenacity import (
+    RetryError,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 import numpy as np
 
 try:  # pragma: no cover - optional dependency for the example entry point
@@ -26,6 +34,13 @@ except Exception as exc:  # pragma: no cover - defer the import error to runtime
 from hyperrag import HyperRAG, QueryParam
 from hyperrag.utils import EmbeddingFunc
 from hyperrag.llm import openai_embedding, openai_complete_if_cache
+
+try:  # pragma: no cover - import is optional depending on the provider used
+    from openai import RateLimitError
+except Exception:  # pragma: no cover - fall back to a generic sentinel exception
+    class RateLimitError(Exception):
+        """Placeholder when the OpenAI client is unavailable."""
+
 
 from my_config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from my_config import EMB_API_KEY, EMB_BASE_URL, EMB_MODEL, EMB_DIM
@@ -44,8 +59,12 @@ def build_es_client(args: argparse.Namespace) -> Elasticsearch:
 
     api_key = args.api_key or os.environ.get("ELASTICSEARCH_API_KEY")
     api_key_id = args.api_key_id or os.environ.get("ELASTICSEARCH_API_KEY_ID")
-    if api_key and api_key_id:
-        kwargs["api_key"] = (api_key_id, api_key)
+    if api_key:
+        if api_key_id:
+            kwargs["api_key"] = (api_key_id, api_key)
+        else:
+            # ElasticSearch also accepts a single base64 API key string.
+            kwargs["api_key"] = api_key
     else:
         username = args.username or os.environ.get("ELASTICSEARCH_USERNAME")
         password = args.password or os.environ.get("ELASTICSEARCH_PASSWORD")
@@ -142,7 +161,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--username", help="ElasticSearch basic auth username")
     parser.add_argument("--password", help="ElasticSearch basic auth password")
     parser.add_argument("--api-key-id", help="ElasticSearch API key identifier")
-    parser.add_argument("--api-key", help="ElasticSearch API key secret")
+    parser.add_argument(
+        "--api-key",
+        help="ElasticSearch API key secret (or full base64 value if no ID is provided)",
+    )
     parser.add_argument(
         "--skip-tls-verify",
         action="store_true",
@@ -159,12 +181,46 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["naive", "hyper", "hyper-lite"],
         help="HyperRAG retrieval mode",
     )
+    parser.add_argument(
+        "--llm-max-async",
+        type=int,
+        default=4,
+        help=(
+            "Maximum number of concurrent LLM calls. Lower this if you encounter "
+            "provider rate limits."
+        ),
+    )
+    parser.add_argument(
+        "--embedding-max-async",
+        type=int,
+        default=4,
+        help=(
+            "Maximum number of concurrent embedding calls. Lower this if you encounter "
+            "provider rate limits."
+        ),
+    )
+    parser.add_argument(
+        "--ingest-retries",
+        type=int,
+        default=5,
+        help=(
+            "Number of exponential-backoff retries to perform when the provider "
+            "returns rate-limit errors during ingestion."
+        ),
+    )
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.llm_max_async < 1:
+        parser.error("--llm-max-async must be a positive integer")
+    if args.embedding_max_async < 1:
+        parser.error("--embedding-max-async must be a positive integer")
+    if args.ingest_retries < 1:
+        parser.error("--ingest-retries must be a positive integer")
 
     client = build_es_client(args)
     source_fields = ["main_content", "breadcrumbs", "title", "titles"]
@@ -186,14 +242,49 @@ def main() -> None:
     rag = HyperRAG(
         working_dir=working_dir,
         llm_model_func=llm_model_func,
+        llm_model_max_async=args.llm_max_async,
         embedding_func=EmbeddingFunc(
             embedding_dim=EMB_DIM,
             max_token_size=8192,
             func=embedding_func,
         ),
+        embedding_func_max_async=args.embedding_max_async,
     )
 
-    rag.insert_elasticsearch_documents(documents)
+    def _is_rate_limit_retryable(exc: BaseException) -> bool:
+        if isinstance(exc, RateLimitError):
+            return True
+        if isinstance(exc, RetryError):
+            last_exc = exc.last_attempt.exception() if exc.last_attempt else None
+            return isinstance(last_exc, RateLimitError)
+        return False
+
+    @retry(
+        reraise=True,
+        retry=retry_if_exception(_is_rate_limit_retryable),
+        stop=stop_after_attempt(args.ingest_retries),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+    )
+    def _insert_with_backoff() -> None:
+        rag.insert_elasticsearch_documents(documents)
+
+    try:
+        _insert_with_backoff()
+    except RateLimitError as exc:
+        raise RuntimeError(
+            "The language model provider reported a rate limit while processing the "
+            "documents. Try lowering --llm-max-async/--embedding-max-async or wait "
+            "before retrying."
+        ) from exc
+    except RetryError as exc:
+        last_exc = exc.last_attempt.exception() if exc.last_attempt else exc
+        if isinstance(last_exc, RateLimitError):
+            raise RuntimeError(
+                "The language model provider reported a rate limit while processing the "
+                "documents. Try lowering --llm-max-async/--embedding-max-async or "
+                "wait before retrying."
+            ) from last_exc
+        raise
 
     print(
         f"Inserted {len(documents)} ElasticSearch documents from index '{args.index}' into HyperRAG."
