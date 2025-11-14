@@ -443,18 +443,21 @@ def format_elasticsearch_document(
         "",
     )
     breadcrumbs_value = _normalize_string_sequence(document.get(breadcrumbs_key))
+    url_path_value = _normalize_string_sequence(document.get("url_path"))
 
     sections: list[str] = []
     if title_value:
         sections.append(f"Title:\n{title_value}")
     if breadcrumbs_value:
         sections.append(f"Breadcrumbs:\n{breadcrumbs_value}")
+    if url_path_value:
+        sections.append(f"URL Path:\n{url_path_value}")
 
     sections.append(f"Main Content:\n{main_content}")
 
     candidate_metadata = metadata_fields
     if candidate_metadata is None:
-        excluded_keys = set(title_keys) | {main_content_key, breadcrumbs_key}
+        excluded_keys = set(title_keys) | {main_content_key, breadcrumbs_key, "url_path"}
         candidate_metadata = [
             key
             for key in document.keys()

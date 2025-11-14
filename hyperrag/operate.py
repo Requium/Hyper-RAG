@@ -185,22 +185,24 @@ async def _handle_single_entity_extraction(
     record_attributes: list[str],
     chunk_key: str,
 ):
-    if len(record_attributes) < 4 or record_attributes[0] != '"Entity"' :
+    if len(record_attributes) < 5 or record_attributes[0] != '"Entity"' :
         return None
     # add this record as a node in the G
-    entity_name = clean_str(record_attributes[1].upper())
+    entity_name = clean_str(record_attributes[1]).strip()
     if not entity_name.strip():
         return None
-    entity_type = clean_str(record_attributes[2].upper())
+    entity_type = clean_str(record_attributes[2]).strip().lower()
     entity_description = clean_str(record_attributes[3])
+    entity_url_path = clean_str(record_attributes[4]).strip()
     entity_source_id = chunk_key
-    entity_additional_properties = clean_str(record_attributes[4:])
+    entity_additional_properties = clean_str(record_attributes[5:])
 
     return dict(
         entity_name=entity_name,
         entity_type=entity_type,
         description=entity_description,
         source_id=entity_source_id,
+        source_url_path=entity_url_path or "unknown",
         additional_properties=entity_additional_properties,
     )
 
@@ -209,26 +211,28 @@ async def _handle_single_relationship_extraction_low(
     record_attributes: list[str],
     chunk_key: str,
 ):
-    if len(record_attributes) < 6 or record_attributes[0] != '"Low-order Hyperedge"':
+    if len(record_attributes) < 7 or record_attributes[0] != '"Low-order Hyperedge"':
         return None
     # add this record as hyperedge
-    entity_num = len(record_attributes) - 3
+    entity_num = len(record_attributes) - 4
     entities = []
     for i in range(1, entity_num):
-        entities.append(clean_str(record_attributes[i].upper()))
-    edge_description = clean_str(record_attributes[-3])
+        entities.append(clean_str(record_attributes[i]))
+    edge_description = clean_str(record_attributes[-4])
 
-    edge_keywords = clean_str(record_attributes[-2])
+    edge_keywords = clean_str(record_attributes[-3])
     edge_source_id = chunk_key
     weight = (
-        float(record_attributes[-1]) if is_float_regex(record_attributes[-1]) else 0.75 # 如果无权重，则默认0.75
+        float(record_attributes[-2]) if is_float_regex(record_attributes[-2]) else 0.75 # 如果无权重，则默认0.75
     )
+    edge_url_paths = clean_str(record_attributes[-1]).strip() or "unknown"
     return dict(
         entityN=entities,
         weight=weight,
         description=edge_description,
         keywords=edge_keywords,
         source_id=edge_source_id,
+        source_url_path=edge_url_paths,
         level_hg="Low-order Hyperedge",
     )
 
@@ -236,25 +240,29 @@ async def _handle_single_relationship_extraction_high(
     record_attributes: list[str],
     chunk_key: str,
 ):
-    if len(record_attributes) < 7 or record_attributes[0] != '"High-order Hyperedge"':
+    if len(record_attributes) < 8 or record_attributes[0] != '"High-order Hyperedge"':
         return None
     # add this record as hyperedge
-    entity_num = len(record_attributes) - 4
+    entity_num = len(record_attributes) - 5
     entities = []
     for i in range(1, entity_num):
-        entities.append(clean_str(record_attributes[i].upper()))
-    edge_description = clean_str(record_attributes[-4])
-    edge_keywords = clean_str(record_attributes[-2])
+        entities.append(clean_str(record_attributes[i]))
+    edge_description = clean_str(record_attributes[-5])
+    edge_generalization = clean_str(record_attributes[-4])
+    edge_keywords = clean_str(record_attributes[-3])
     edge_source_id = chunk_key
     weight = (
-        float(record_attributes[-1]) if is_float_regex(record_attributes[-1]) else 0.75
+        float(record_attributes[-2]) if is_float_regex(record_attributes[-2]) else 0.75
     )
+    edge_url_paths = clean_str(record_attributes[-1]).strip() or "unknown"
     return dict(
         entityN=entities,
         weight=weight,
         description=edge_description,
+        generalization=edge_generalization,
         keywords=edge_keywords,
         source_id=edge_source_id,
+        source_url_path=edge_url_paths,
         level_hg="High-order Hyperedge",
     )
 
@@ -267,6 +275,7 @@ async def _merge_nodes_then_upsert(
 ):
     already_entity_types = []
     already_source_ids = []
+    already_source_url_paths = []
     already_description = []
     already_additional_properties = []
 
@@ -284,6 +293,12 @@ async def _merge_nodes_then_upsert(
         already_source_ids.extend(
             split_string_by_multi_markers(already_node["source_id"], [GRAPH_FIELD_SEP])
         )
+        if already_node.get("source_url_path"):
+            already_source_url_paths.extend(
+                split_string_by_multi_markers(
+                    already_node["source_url_path"], [GRAPH_FIELD_SEP]
+                )
+            )
         already_description.append(already_node["description"])
         already_additional_properties.append(already_node["additional_properties"])
 
@@ -309,15 +324,25 @@ async def _merge_nodes_then_upsert(
         sorted(set([dp["description"] for dp in nodes_data] + already_description))
     )
     additional_properties = GRAPH_FIELD_SEP.join(
-        sorted(set(
-            prop
-            for dp in nodes_data
-            for prop in dp["additional_properties"]
-        ) | set(already_additional_properties))
+        sorted(
+            set(
+                clean_str(prop)
+                for dp in nodes_data
+                for prop in dp["additional_properties"]
+            )
+            | set(already_additional_properties)
+        )
     )
     source_id = GRAPH_FIELD_SEP.join(
         set([dp["source_id"] for dp in nodes_data] + already_source_ids)
     )
+    node_urls = [
+        clean_str(dp.get("source_url_path", "")).strip()
+        for dp in nodes_data
+        if dp.get("source_url_path")
+    ]
+    existing_urls = [clean_str(url).strip() for url in already_source_url_paths if url]
+    source_url_path = GRAPH_FIELD_SEP.join(sorted(set(node_urls + existing_urls))) or "unknown"
     description = await _handle_entity_summary(
         entity_name, description, global_config
     )
@@ -328,6 +353,7 @@ async def _merge_nodes_then_upsert(
         entity_type=entity_type,
         description=description,
         source_id=source_id,
+        source_url_path=source_url_path,
         additional_properties=additional_properties,
     )
     await knowledge_hypergraph_inst.upsert_vertex(
@@ -346,8 +372,10 @@ async def _merge_edges_then_upsert(
 ):
     already_weights = []
     already_source_ids = []
+    already_source_url_paths = []
     already_description = []
     already_keywords = []
+    already_generalizations = []
 
     if await knowledge_hypergraph_inst.has_hyperedge(id_set):
         already_edge = await knowledge_hypergraph_inst.get_hyperedge(id_set)
@@ -355,21 +383,56 @@ async def _merge_edges_then_upsert(
         already_source_ids.extend(
             split_string_by_multi_markers(already_edge["source_id"], [GRAPH_FIELD_SEP])
         )
-        already_description.append(already_edge["description"])
+        already_description.append(already_edge.get("description", ""))
         already_keywords.extend(
-            split_string_by_multi_markers(already_edge["keywords"], [GRAPH_FIELD_SEP])
+            split_string_by_multi_markers(already_edge.get("keywords", ""), [GRAPH_FIELD_SEP])
         )
+        if already_edge.get("generalization"):
+            already_generalizations.extend(
+                split_string_by_multi_markers(
+                    already_edge["generalization"], [GRAPH_FIELD_SEP]
+                )
+            )
+        if already_edge.get("source_url_path"):
+            already_source_url_paths.extend(
+                split_string_by_multi_markers(
+                    already_edge["source_url_path"], [GRAPH_FIELD_SEP]
+                )
+            )
 
     weight = sum([dp["weight"] for dp in edges_data] + already_weights)
     description = GRAPH_FIELD_SEP.join(
-        sorted(set([dp["description"] for dp in edges_data] + already_description))
+        sorted(
+            set([dp.get("description", "") for dp in edges_data] + already_description)
+        )
     )
     keywords = GRAPH_FIELD_SEP.join(
-        sorted(set([dp["keywords"] for dp in edges_data] + already_keywords))
+        sorted(
+            set([dp.get("keywords", "") for dp in edges_data] + already_keywords)
+        )
+    )
+    generalization = GRAPH_FIELD_SEP.join(
+        sorted(
+            set(
+                [dp.get("generalization", "") for dp in edges_data]
+                + already_generalizations
+            )
+        )
     )
     source_id = GRAPH_FIELD_SEP.join(
         set([dp["source_id"] for dp in edges_data] + already_source_ids)
     )
+    edge_urls = [
+        clean_str(dp.get("source_url_path", "")).strip()
+        for dp in edges_data
+        if dp.get("source_url_path")
+    ]
+    existing_edge_urls = [
+        clean_str(url).strip() for url in already_source_url_paths if url
+    ]
+    source_url_path = GRAPH_FIELD_SEP.join(
+        sorted(set(edge_urls + existing_edge_urls))
+    ) or "unknown"
 
     for need_insert_id in id_set:
         if not (await knowledge_hypergraph_inst.has_vertex(need_insert_id)):
@@ -377,6 +440,7 @@ async def _merge_edges_then_upsert(
                 need_insert_id,
                 {
                     "source_id": source_id,
+                    "source_url_path": source_url_path,
                     "description": "UNKNOWN", # 超边描述
                     "additional_properties": "UNKNOWN", # 超边关键词
                     "entity_type": "UNKNOWN",
@@ -395,7 +459,9 @@ async def _merge_edges_then_upsert(
         dict(
             description=description,
             keywords=filter_keywords,
+            generalization=generalization,
             source_id=source_id,
+            source_url_path=source_url_path,
             weight=weight
         ),
     )
@@ -404,6 +470,8 @@ async def _merge_edges_then_upsert(
         id_set=id_set,
         description=description,
         keywords=filter_keywords,
+        generalization=generalization,
+        source_url_path=source_url_path,
     )
 
     return edge_data
@@ -428,7 +496,11 @@ async def extract_entities(
         record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"]
     )
-    example_prompt = PROMPTS["entity_extraction_examples"][3]
+    example_prompt = (
+        PROMPTS["entity_extraction_examples"][0]
+        if PROMPTS["entity_extraction_examples"]
+        else ""
+    )
     example_str = example_prompt.format(**example_base)
 
     context_base = dict(
