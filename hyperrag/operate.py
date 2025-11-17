@@ -31,6 +31,68 @@ from .base import (
 
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
 
+
+def _prepare_entity_extraction_templates(global_config: dict):
+    entity_extract_prompt = PROMPTS["entity_extraction"]
+    example_base = dict(
+        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
+        record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
+        completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
+    )
+    example_prompt = (
+        PROMPTS["entity_extraction_examples"][0]
+        if PROMPTS["entity_extraction_examples"]
+        else ""
+    )
+    example_str = example_prompt.format(**example_base)
+
+    context_base = dict(
+        language=PROMPTS["DEFAULT_LANGUAGE"],
+        entity_types=",".join(PROMPTS["DEFAULT_ENTITY_TYPES"]),
+        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
+        record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
+        completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
+        examples=example_str,
+    )
+
+    return dict(
+        entity_extract_prompt=entity_extract_prompt,
+        context_base=context_base,
+        continue_prompt=PROMPTS["entity_continue_extraction"],
+        if_loop_prompt=PROMPTS["entity_if_loop_extraction"],
+    )
+
+
+def build_entity_extraction_prompts(
+    chunks: dict[str, TextChunkSchema], global_config: dict
+) -> list[dict]:
+    """Prepare entity extraction prompts for inspection or offline runs.
+
+    The returned list contains the prompt alongside chunk metadata so that the
+    caller can inspect what will be sent to the LLM without triggering any
+    extraction calls or hypergraph updates.
+    """
+
+    template_data = _prepare_entity_extraction_templates(global_config)
+    entity_extract_prompt = template_data["entity_extract_prompt"]
+    context_base = template_data["context_base"]
+
+    prompts = []
+    for chunk_key, chunk_dp in chunks.items():
+        prompt = entity_extract_prompt.format(
+            **context_base, input_text=chunk_dp["content"]
+        )
+        prompts.append(
+            {
+                "chunk_id": chunk_key,
+                "full_doc_id": chunk_dp.get("full_doc_id", ""),
+                "prompt": prompt,
+                "chunk_content": chunk_dp["content"],
+            }
+        )
+
+    return prompts
+
 def chunking_by_token_size(
     content: str,
     overlap_token_size: int = 128,
@@ -489,30 +551,11 @@ async def extract_entities(
 
     ordered_chunks = list(chunks.items())
 
-    entity_extract_prompt = PROMPTS["entity_extraction"]
-    # We can choose the example what we want from the prompt.
-    example_base = dict(
-        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
-        record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
-        completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"]
-    )
-    example_prompt = (
-        PROMPTS["entity_extraction_examples"][0]
-        if PROMPTS["entity_extraction_examples"]
-        else ""
-    )
-    example_str = example_prompt.format(**example_base)
-
-    context_base = dict(
-        language=PROMPTS["DEFAULT_LANGUAGE"],
-        entity_types=",".join(PROMPTS["DEFAULT_ENTITY_TYPES"]),
-        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
-        record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
-        completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
-        examples = example_str
-    )
-    continue_prompt = PROMPTS["entity_continue_extraction"]
-    if_loop_prompt = PROMPTS["entity_if_loop_extraction"]
+    template_data = _prepare_entity_extraction_templates(global_config)
+    entity_extract_prompt = template_data["entity_extract_prompt"]
+    context_base = template_data["context_base"]
+    continue_prompt = template_data["continue_prompt"]
+    if_loop_prompt = template_data["if_loop_prompt"]
 
     already_processed = 0
     already_entities = 0
