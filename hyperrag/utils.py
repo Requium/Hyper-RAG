@@ -423,9 +423,10 @@ def format_elasticsearch_document(
     Returns
     -------
     str
-        Human-readable text that prioritises ``main_content`` while preserving
-        concise breadcrumbs and title context so HyperRAG can ingest the
-        document with minimal preprocessing.
+        Human-readable text that emits a JSON metadata header (title,
+        breadcrumbs, url_path, and any requested fields) followed by the raw
+        main content so HyperRAG can ingest the document with minimal
+        preprocessing.
     """
 
     if main_content_key not in document or not str(document[main_content_key]).strip():
@@ -445,15 +446,13 @@ def format_elasticsearch_document(
     breadcrumbs_value = _normalize_string_sequence(document.get(breadcrumbs_key))
     url_path_value = _normalize_string_sequence(document.get("url_path"))
 
-    sections: list[str] = []
+    metadata_obj: dict[str, Any] = {}
     if title_value:
-        sections.append(f"Title:\n{title_value}")
+        metadata_obj["title"] = title_value
     if breadcrumbs_value:
-        sections.append(f"Breadcrumbs:\n{breadcrumbs_value}")
+        metadata_obj["breadcrumbs"] = breadcrumbs_value
     if url_path_value:
-        sections.append(f"URL Path:\n{url_path_value}")
-
-    sections.append(f"Main Content:\n{main_content}")
+        metadata_obj["url_path"] = url_path_value
 
     candidate_metadata = metadata_fields
     if candidate_metadata is None:
@@ -464,16 +463,19 @@ def format_elasticsearch_document(
             if key not in excluded_keys
         ]
 
-    metadata_lines = []
     for key in candidate_metadata:
         if key not in document:
             continue
         value = _normalize_string_sequence(document[key], delimiter=", ")
         if not value:
             continue
-        metadata_lines.append(f"{key}: {value}")
+        metadata_obj.setdefault("metadata", {})[key] = value
 
-    if metadata_lines:
-        sections.append("Metadata:\n" + "\n".join(metadata_lines))
+    sections: list[str] = []
+    if metadata_obj:
+        compact_metadata = json.dumps(metadata_obj, ensure_ascii=False, indent=2)
+        sections.append(f"Document Metadata (JSON):\n{compact_metadata}")
+
+    sections.append(f"main_content:\n{main_content}")
 
     return "\n\n".join(sections)

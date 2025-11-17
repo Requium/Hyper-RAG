@@ -232,7 +232,7 @@ def main() -> None:
         parser.error("--ingest-retries must be a positive integer")
 
     client = build_es_client(args)
-    source_fields = ["main_content", "breadcrumbs", "title", "titles"]
+    source_fields = ["main_content", "breadcrumbs", "title", "titles", "url_path"]
 
     documents = fetch_elasticsearch_documents(
         client,

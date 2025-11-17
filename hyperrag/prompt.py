@@ -20,7 +20,7 @@ PROMPTS["DEFAULT_ENTITY_TYPES"] = [
 ]
 
 PROMPTS["entity_extraction"] = """-Goal-
-Given ElasticSearch ES|QL documentation such as tutorials, guides, blogs, or troubleshooting notes that include fields like titles, breadcrumbs, url_path, and main_content, identify all entities of the requested types. Then construct hyperedges by extracting complex relationships among the identified entities so the knowledge graph reflects how ES|QL concepts relate across practical workflows.
+Given ElasticSearch ES|QL documentation such as tutorials, guides, blogs, or troubleshooting notes, identify all entities of the requested types. Each document begins with a JSON metadata block containing keys like `title`, `breadcrumbs`, `url_path`, and `metadata`, followed by the raw `main_content`. Rely on those JSON keys directly (do **not** infer different names) so the knowledge graph reflects how ES|QL concepts relate across practical workflows.
 Use {language} as output language.
 Treat every document provided in the **Text** section (they are prefixed with "Document <n>:") as part of the same knowledge corpus so that relationships can form across document boundaries.
 
@@ -31,8 +31,8 @@ Treat every document provided in the **Text** section (they are prefixed with "D
 - entity_name: Use snake_case without spaces, derived from the document context (title, breadcrumbs, main_content). Do **not** append redundant suffixes like `_command` or `_concept` unless they explicitly appear in the source text.
 - entity_type: One of the following types: [{entity_types}] (add additional types only when essential for ES|QL comprehension).
 - entity_description: Technical yet concise description capturing what the entity represents, when it is used, and how it relates to ES|QL scenarios. Blend supporting evidence from titles, breadcrumbs, and main_content so tagging context is preserved.
-- source_url_path: Extract the `url_path` metadata associated with the content. If a value is unavailable, use `unknown`.
-- additional_properties: Other attributes associated with the entity, such as prerequisites, related indices, parameters, supported versions, breadcrumbs tags, or example snippets. Use key:value pairs separated by commas, prefer snake_case keys, and include breadcrumbs/title cues when they help tag the entity.
+- source_url_path: Read the `url_path` from the metadata JSON block. If a value is unavailable, use `unknown` and do not invent new paths.
+- additional_properties: Other attributes associated with the entity, such as prerequisites, related indices, parameters, supported versions, breadcrumbs tags, or example snippets. Use key:value pairs separated by commas, prefer snake_case keys, and include breadcrumbs/title cues when they help tag the entity. Reference JSON field names (e.g., `metadata`, `breadcrumbs`, `title`) exactly as provided.
 Format each entity as ("Entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>{tuple_delimiter}<source_url_path>{tuple_delimiter}<additional_properties>)
 
 2. From the entities identified in step 1, identify all pairs of (source_entity, target_entity) that are *clearly related* to each other in an ES|QL workflow.
