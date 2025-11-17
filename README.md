@@ -151,6 +151,12 @@ query.
    which ElasticSearch index is queried, allowing you to target a specific
    collection when running multiple ES|QL crawls.
 
+   To inspect the generated entity-extraction prompts without calling the LLM
+   or writing to the hypergraph, add `--preview-only`. This writes
+   `entity_extraction_prompts.jsonl` under the `caches/<data_name>/` directory
+   (where `data_name` is derived from your index, e.g., `esql-esql_docs`) so you
+   can review the payload before incurring provider costs.
+
 5. If you are connecting to a development cluster with self-signed
    certificates, add `--skip-tls-verify` to the command to disable certificate
    verification. Only use this option in trusted environments.

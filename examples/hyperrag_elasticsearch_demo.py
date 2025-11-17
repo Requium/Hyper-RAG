@@ -208,6 +208,15 @@ def build_parser() -> argparse.ArgumentParser:
             "returns rate-limit errors during ingestion."
         ),
     )
+    parser.add_argument(
+        "--preview-only",
+        action="store_true",
+        help=(
+            "Skip LLM extraction and hypergraph writes; instead dump the entity "
+            "extraction prompts to caches/<data_name>/entity_extraction_prompts.jsonl "
+            "for inspection."
+        ),
+    )
     return parser
 
 
@@ -265,14 +274,15 @@ def main() -> None:
         stop=stop_after_attempt(args.ingest_retries),
         wait=wait_exponential(multiplier=1, min=2, max=60),
     )
-    def _insert_with_backoff() -> None:
-        rag.insert_elasticsearch_documents(
+    def _insert_with_backoff():
+        return rag.insert_elasticsearch_documents(
             documents,
             combine_documents=True,
+            preview_only=args.preview_only,
         )
 
     try:
-        _insert_with_backoff()
+        insert_result = _insert_with_backoff()
     except RateLimitError as exc:
         raise RuntimeError(
             "The language model provider reported a rate limit while processing the "
@@ -292,6 +302,17 @@ def main() -> None:
     print(
         f"Inserted {len(documents)} ElasticSearch documents from index '{args.index}' into HyperRAG."
     )
+
+    if args.preview_only:
+        preview_path = working_dir / "entity_extraction_prompts.jsonl"
+        num_prompts = len(insert_result or []) if insert_result else 0
+        print(
+            "\nPreview-only mode: wrote entity extraction prompts to"
+            f" {preview_path.resolve()}"
+        )
+        print(f"Prompt records generated: {num_prompts}")
+        print("Skipping hypergraph ingestion and querying to avoid LLM costs.")
+        return
 
     response = rag.query(
         args.question,
