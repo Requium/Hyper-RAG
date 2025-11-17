@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -7,6 +8,7 @@ from typing import Mapping, Sequence, Type, cast
 
 from .operate import (
     chunking_by_token_size,
+    build_entity_extraction_prompts,
     extract_entities,
     hyper_query_lite,
     hyper_query,
@@ -172,9 +174,11 @@ class HyperRAG:
             )
         )
 
-    def insert(self, string_or_strings):
+    def insert(self, string_or_strings, *, preview_only: bool = False):
         loop = always_get_an_event_loop()
-        return loop.run_until_complete(self.ainsert(string_or_strings))
+        return loop.run_until_complete(
+            self.ainsert(string_or_strings, preview_only=preview_only)
+        )
 
     def insert_elasticsearch_documents(
         self,
@@ -182,6 +186,7 @@ class HyperRAG:
         *,
         combine_documents: bool = False,
         document_separator: str | None = None,
+        preview_only: bool = False,
         **format_kwargs,
     ):
         """Insert ElasticSearch ES|QL documents after formatting their content.
@@ -213,9 +218,9 @@ class HyperRAG:
                 combined_payload.append(f"Document {index}:\n{content}")
             formatted_docs = [separator.join(combined_payload)]
 
-        return self.insert(formatted_docs)
+        return self.insert(formatted_docs, preview_only=preview_only)
 
-    async def ainsert(self, string_or_strings):
+    async def ainsert(self, string_or_strings, *, preview_only: bool = False):
         try:
             if isinstance(string_or_strings, str):
                 string_or_strings = [string_or_strings]
@@ -258,6 +263,24 @@ class HyperRAG:
                 return
             # ----------------------------------------------------------------------------
             logger.info(f"[New Chunks] inserting {len(inserting_chunks)} chunks")
+
+            if preview_only:
+                preview_records = build_entity_extraction_prompts(
+                    inserting_chunks, asdict(self)
+                )
+                preview_file = os.path.join(
+                    self.working_dir, "entity_extraction_prompts.jsonl"
+                )
+                with open(preview_file, "w", encoding="utf-8") as fp:
+                    for record in preview_records:
+                        fp.write(json.dumps(record, ensure_ascii=False))
+                        fp.write("\n")
+                logger.info(
+                    "[Preview Only] Saved %s prompts to %s",
+                    len(preview_records),
+                    preview_file,
+                )
+                return preview_records
 
             await self.chunks_vdb.upsert(inserting_chunks)
             # ----------------------------------------------------------------------------
