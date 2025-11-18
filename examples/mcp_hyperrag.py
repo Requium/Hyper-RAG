@@ -6,8 +6,15 @@ ElasticSearch. Point it to a cache created beforehand (for example the one
 produced by ``examples/hyperrag_elasticsearch_demo.py``) and call the
 ``query_hyperrag`` tool from any MCP-compatible client.
 
-Example launch:
+Example launches:
+    # Local stdio transport
     python examples/mcp_hyperrag.py --working-dir caches/esql-esql_docs
+
+    # Remote HTTP transport so clients can reach http://<host>:8000/mcp
+    python examples/mcp_hyperrag.py --working-dir caches/esql-esql_docs \
+        --transport streamable-http --host 0.0.0.0 --port 8000
+
+See `examples/README_mcp_hyperrag.md` for client configuration examples.
 """
 
 from __future__ import annotations
@@ -117,8 +124,37 @@ if __name__ == "__main__":
         required=True,
         help="Existing HyperRAG cache directory (no ingestion is performed)",
     )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="MCP transport to expose. Use streamable-http for remote clients.",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host/IP to bind (only used with streamable-http)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind (only used with streamable-http)",
+    )
+    parser.add_argument(
+        "--http-path",
+        default="/mcp",
+        help="Base HTTP path for the MCP endpoint when using streamable-http",
+    )
     args = parser.parse_args()
 
     # Pre-load the cache so the first MCP call is fast and errors early if missing
     load_rag(args.working_dir)
-    app.run()
+
+    # Update bind settings when running over HTTP
+    if args.transport == "streamable-http":
+        app.settings.host = args.host
+        app.settings.port = args.port
+        app.settings.streamable_http_path = args.http_path
+
+    app.run(transport=args.transport)
