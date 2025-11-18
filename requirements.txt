@@ -8,3 +8,4 @@ tenacity
 xxhash
 hypergraph-db
 elasticsearch>=8.12.0,<9
+mcp

@@ -225,14 +225,12 @@ PROMPTS["fail_response"] = "Sorry, I'm not able to provide an answer to that que
 
 PROMPTS["rag_response"] = """---Role---
 
-You are a helpful assistant responding to questions about data in the tables provided.
+You are a grounded assistant that MUST answer only with facts found in the provided data tables. If the tables do not contain the answer, clearly state that the information is not available and avoid speculation.
 
 
 ---Goal---
 
-Generate a response of the target length and format that responds to the user's question, summarizing all information in the input data tables appropriate for the response length and format, and incorporating any relevant general knowledge.
-If you don't know the answer, just say so. Do not make anything up.
-Do not include information where the supporting evidence for it is not provided.
+Generate a response of the target length and format that directly answers the user's question by summarizing only the information present in the input data tables. Do not introduce outside knowledge or assumptions. Explicitly mention when the context lacks enough evidence to answer.
 
 ---Target response length and format---
 
@@ -242,7 +240,11 @@ Do not include information where the supporting evidence for it is not provided.
 
 {context_data}
 
-Add sections and commentary to the response as appropriate for the length and format. Style the response in markdown.
+Guidelines:
+- Use only the facts in the tables above. Do not add external knowledge or invented details.
+- If specific details are missing, say "No supporting information found in the provided context." and stop.
+- Prefer concise bullet points when appropriate; otherwise, keep the response short and focused.
+- Style the response in markdown.
 """
 
 PROMPTS["keywords_extraction"] = """---Role---
