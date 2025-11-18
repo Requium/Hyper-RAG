@@ -93,9 +93,7 @@ async def query_hyperrag(
     working_dir: str,
     mode: str = "hyper",
     top_k: int = 60,
-    response_type: str = (
-        "Grounded answer in markdown that only uses the provided context; say 'No supporting information found in the provided context.' if the data is missing."
-    ),
+    response_type: str = "Multiple Paragraphs",
 ) -> str:
     """Ask a question against a cached HyperRAG workspace.
 
