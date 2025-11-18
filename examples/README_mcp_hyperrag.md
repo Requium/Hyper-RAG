@@ -37,11 +37,6 @@ reutiliza el caché existente.
 
 ## Ejemplos de configuración de herramientas
 
-> Nota sobre las respuestas: el servidor ahora usa un prompt "grounded" que solo
-> responde con hechos encontrados en el contexto del hypergraph/cache. Si falta
-> información en los datos recuperados, la respuesta dirá explícitamente que no
-> hay información de soporte en el contexto en lugar de inventar contenido.
-
 ### JSON estilo Claude Desktop (usando HTTP remoto)
 ```json
 {
