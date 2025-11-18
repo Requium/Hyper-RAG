@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import sys
 from typing import Any, Iterable, Mapping, Sequence
 
 from tenacity import (
@@ -30,6 +31,10 @@ except Exception as exc:  # pragma: no cover - defer the import error to runtime
     raise ImportError(
         "The 'elasticsearch' package is required to run the ElasticSearch demo"
     ) from exc
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from hyperrag import HyperRAG, QueryParam
 from hyperrag.utils import EmbeddingFunc
@@ -145,6 +150,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("index", help="ElasticSearch index name to search")
     parser.add_argument(
+        "--working-dir",
+        type=Path,
+        help=(
+            "Optional directory containing a prebuilt HyperRAG cache. Defaults to "
+            "caches/esql-<index>."
+        ),
+    )
+    parser.add_argument(
         "--keyword",
         help="Optional keyword expression to filter documents (uses simple_query_string)",
     )
@@ -180,6 +193,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="hyper",
         choices=["naive", "hyper", "hyper-lite"],
         help="HyperRAG retrieval mode",
+    )
+    parser.add_argument(
+        "--question-only",
+        action="store_true",
+        help=(
+            "Skip ElasticSearch retrieval and ingestion; reuse an existing "
+            "HyperRAG cache in --working-dir (or caches/esql-<index>)."
+        ),
     )
     parser.add_argument(
         "--llm-max-async",
@@ -231,22 +252,16 @@ def main() -> None:
     if args.ingest_retries < 1:
         parser.error("--ingest-retries must be a positive integer")
 
-    client = build_es_client(args)
-    source_fields = ["main_content", "breadcrumbs", "title", "titles", "url_path"]
-
-    documents = fetch_elasticsearch_documents(
-        client,
-        index=args.index,
-        limit=args.limit,
-        keyword=args.keyword,
-        source_fields=source_fields,
-    )
-    if not documents:
-        raise RuntimeError("No ElasticSearch documents found for the provided parameters")
-
     data_name = f"esql-{args.index}"
-    working_dir = Path("caches") / data_name
-    working_dir.mkdir(parents=True, exist_ok=True)
+    working_dir = args.working_dir or Path("caches") / data_name
+    if args.question_only:
+        if not working_dir.exists():
+            raise RuntimeError(
+                "--question-only was provided but no existing HyperRAG cache was found. "
+                "Use the ingestion path first or point --working-dir to a valid cache."
+            )
+    else:
+        working_dir.mkdir(parents=True, exist_ok=True)
 
     rag = HyperRAG(
         working_dir=working_dir,
@@ -281,38 +296,57 @@ def main() -> None:
             preview_only=args.preview_only,
         )
 
-    try:
-        insert_result = _insert_with_backoff()
-    except RateLimitError as exc:
-        raise RuntimeError(
-            "The language model provider reported a rate limit while processing the "
-            "documents. Try lowering --llm-max-async/--embedding-max-async or wait "
-            "before retrying."
-        ) from exc
-    except RetryError as exc:
-        last_exc = exc.last_attempt.exception() if exc.last_attempt else exc
-        if isinstance(last_exc, RateLimitError):
+    if not args.question_only:
+        client = build_es_client(args)
+        source_fields = ["main_content", "breadcrumbs", "title", "titles", "url_path"]
+
+        documents = fetch_elasticsearch_documents(
+            client,
+            index=args.index,
+            limit=args.limit,
+            keyword=args.keyword,
+            source_fields=source_fields,
+        )
+        if not documents:
+            raise RuntimeError("No ElasticSearch documents found for the provided parameters")
+
+        try:
+            insert_result = _insert_with_backoff()
+        except RateLimitError as exc:
             raise RuntimeError(
                 "The language model provider reported a rate limit while processing the "
-                "documents. Try lowering --llm-max-async/--embedding-max-async or "
-                "wait before retrying."
-            ) from last_exc
-        raise
+                "documents. Try lowering --llm-max-async/--embedding-max-async or wait "
+                "before retrying."
+            ) from exc
+        except RetryError as exc:
+            last_exc = exc.last_attempt.exception() if exc.last_attempt else exc
+            if isinstance(last_exc, RateLimitError):
+                raise RuntimeError(
+                    "The language model provider reported a rate limit while processing the "
+                    "documents. Try lowering --llm-max-async/--embedding-max-async or "
+                    "wait before retrying."
+                ) from last_exc
+            raise
 
-    print(
-        f"Inserted {len(documents)} ElasticSearch documents from index '{args.index}' into HyperRAG."
-    )
-
-    if args.preview_only:
-        preview_path = working_dir / "entity_extraction_prompts.jsonl"
-        num_prompts = len(insert_result or []) if insert_result else 0
         print(
-            "\nPreview-only mode: wrote entity extraction prompts to"
-            f" {preview_path.resolve()}"
+            f"Inserted {len(documents)} ElasticSearch documents from index '{args.index}' into HyperRAG."
         )
-        print(f"Prompt records generated: {num_prompts}")
-        print("Skipping hypergraph ingestion and querying to avoid LLM costs.")
-        return
+
+        if args.preview_only:
+            preview_path = working_dir / "entity_extraction_prompts.jsonl"
+            num_prompts = len(insert_result or []) if insert_result else 0
+            print(
+                "\nPreview-only mode: wrote entity extraction prompts to"
+                f" {preview_path.resolve()}"
+            )
+            print(f"Prompt records generated: {num_prompts}")
+            print("Skipping hypergraph ingestion and querying to avoid LLM costs.")
+            return
+    else:
+        print(
+            "Question-only mode: skipping ElasticSearch access and using existing cache at "
+            f"{working_dir.resolve()}"
+        )
 
     response = rag.query(
         args.question,
